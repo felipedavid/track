@@ -11,10 +11,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let toggleTrackingItem = NSMenuItem()
     private let stopFocusTimerItem = NSMenuItem()
     private let todayItem = NSMenuItem()
+    private let onToggleTracking: () -> Void
 
-    init(tracker: TimeTracker, focusTimer: FocusTimer) {
+    init(tracker: TimeTracker, focusTimer: FocusTimer, onToggleTracking: @escaping () -> Void) {
         self.tracker = tracker
         self.focusTimer = focusTimer
+        self.onToggleTracking = onToggleTracking
         super.init()
 
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -75,12 +77,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleTracking() {
-        if tracker.isTracking {
-            focusTimer.cancel()
-            tracker.stop(reason: "manual")
-        } else {
-            tracker.start()
-        }
+        onToggleTracking()
     }
 
     @objc private func startFocusPreset(_ sender: NSMenuItem) {
@@ -113,7 +110,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private func refresh() {
         stopFocusTimerItem.isHidden = !focusTimer.isActive
-        toggleTrackingItem.title = tracker.isTracking ? "Stop Tracking" : "Start Tracking"
+        let toggleTitle = tracker.isTracking ? "Stop Tracking" : "Start Tracking"
+        // Shown as a hint only — the real shortcut is the global Carbon hot key in
+        // GlobalHotKey.swift. A real keyEquivalent here would double-fire when the
+        // combo is pressed while this menu happens to be open.
+        toggleTrackingItem.title = "\(toggleTitle)  ⌃⌥⌘T"
 
         let todaySeconds = tracker.elapsedTodaySeconds()
         todayItem.title = "Today: \(formatDuration(todaySeconds))"

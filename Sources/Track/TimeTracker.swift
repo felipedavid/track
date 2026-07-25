@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Tracks whether work time is currently being logged. Elapsed time is always computed
@@ -22,6 +23,7 @@ final class TimeTracker {
         currentSessionId = database.startSession(at: now)
         currentStart = now
         isTracking = true
+        NSSound(named: "Pop")?.play()
         onChange?()
     }
 
@@ -31,6 +33,7 @@ final class TimeTracker {
         isTracking = false
         currentSessionId = nil
         currentStart = nil
+        NSSound(named: "Bottle")?.play()
         onChange?()
     }
 
