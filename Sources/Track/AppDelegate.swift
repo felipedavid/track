@@ -6,13 +6,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var tracker: TimeTracker!
     private var focusTimer: FocusTimer!
     private var lockMonitor: LockMonitor!
+    private var dashboardWindowController: DashboardWindowController!
     private var statusBarController: StatusBarController!
     private var globalHotKey: GlobalHotKey!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let database = Database()
+        var dbOverride: String?
+        if let flagIndex = CommandLine.arguments.firstIndex(of: "--db"), flagIndex + 1 < CommandLine.arguments.count {
+            dbOverride = CommandLine.arguments[flagIndex + 1]
+        }
+        let database = Database(overridePath: dbOverride)
         let tracker = TimeTracker(database: database)
         let focusTimer = FocusTimer(tracker: tracker)
 
@@ -27,14 +32,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        let dashboardWindowController = DashboardWindowController(database: database)
+
         self.database = database
         self.tracker = tracker
         self.focusTimer = focusTimer
         self.lockMonitor = LockMonitor(tracker: tracker, focusTimer: focusTimer)
+        self.dashboardWindowController = dashboardWindowController
         self.statusBarController = StatusBarController(
             tracker: tracker,
             focusTimer: focusTimer,
-            onToggleTracking: toggleTracking
+            onToggleTracking: toggleTracking,
+            onShowReport: { dashboardWindowController.show() }
         )
         // Control+Option+Command+T: unlikely to collide with any app or system shortcut,
         // since it's captured globally regardless of which app is frontmost.

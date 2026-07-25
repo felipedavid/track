@@ -23,6 +23,11 @@ macOS.
   ("Bottle"), regardless of what triggered it — menu click, hotkey, or auto-stop
 - **Menu bar indicator** — `○` idle, `●` tracking, `⏰` focus target reached, each
   followed by today's running total (e.g. `● 1h 23m`), refreshed every 15s
+- **Productivity dashboard** — "Dashboard…" in the menu opens a live window (built with
+  a `WKWebView`, no data ever leaves the Mac) with a GitHub-style calendar heatmap, a
+  30h/40h/60h weekly goal tracker, a day×hour "when you work" grid, a 7-day momentum
+  trend, deep-work ratio, personal records, and more — computed fresh from `track.db`
+  every time it's opened, and refreshed in place every 30s while it stays open
 - **Crash-safe** — if the app is killed while tracking, the next launch closes the
   dangling session at zero duration instead of silently inflating your hours
 
@@ -50,6 +55,8 @@ track/
       FocusTimer.swift         Countdown timer, beep on completion
       LockMonitor.swift        Screen lock / sleep notifications -> auto-stop
       GlobalHotKey.swift       System-wide keyboard shortcut (Carbon hot key API)
+      ReportGenerator.swift    Computes every dashboard metric, renders the HTML/JS report
+      DashboardWindowController.swift  Live WKWebView window showing the dashboard
       StatusBarController.swift Menu bar item, dropdown menu, all UI
 ```
 
@@ -99,8 +106,23 @@ active tracking session (`reason: "screen-lock"` or `"sleep"`) and cancels any r
 focus timer, since its target stops being meaningful once you've stepped away.
 
 **StatusBarController.swift** owns the `NSStatusItem`, builds the dropdown menu (Start/
-Stop Tracking, Start Focus Timer submenu, Stop Focus Timer, today's total, Quit), and
-redraws the title on every state change plus a 15-second timer for the live counter.
+Stop Tracking, Start Focus Timer submenu, Stop Focus Timer, today's total, Dashboard,
+Quit), and redraws the title on every state change plus a 15-second timer for the live
+counter.
+
+**ReportGenerator.swift** reads every session via `Database.allSessions()` and computes
+every metric shown on the dashboard — streaks, a Sunday-aligned rolling-year calendar
+heatmap, weekly/monthly totals, a day×hour "punch card" of when you work, a 7-day
+rolling-average momentum trend, deep-work ratio (time in sessions ≥1h), session-length
+distribution, and personal records — then renders it into a single self-contained HTML
+string (inline CSS/JS, charts drawn as hand-built SVG, no external requests). It never
+touches disk; `buildHTML()` produces the full page for the first load, and
+`buildRefreshJSON()` produces just the data for subsequent refreshes.
+
+**DashboardWindowController.swift** owns the dashboard's `NSWindow` and `WKWebView`. The
+page loads once; a 30-second timer (and `windowDidBecomeKey`) keeps it live by pushing
+fresh JSON into the already-loaded page and calling its `renderAll()` again, rather than
+reloading the page outright — a reload would reset scroll position every refresh.
 
 **AppDelegate.swift** constructs `Database` → `TimeTracker` → `FocusTimer` /
 `LockMonitor` → `StatusBarController` at launch, sets `NSApp.setActivationPolicy(.accessory)`

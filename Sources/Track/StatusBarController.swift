@@ -12,11 +12,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let stopFocusTimerItem = NSMenuItem()
     private let todayItem = NSMenuItem()
     private let onToggleTracking: () -> Void
+    private let onShowReport: () -> Void
 
-    init(tracker: TimeTracker, focusTimer: FocusTimer, onToggleTracking: @escaping () -> Void) {
+    init(tracker: TimeTracker, focusTimer: FocusTimer, onToggleTracking: @escaping () -> Void, onShowReport: @escaping () -> Void) {
         self.tracker = tracker
         self.focusTimer = focusTimer
         self.onToggleTracking = onToggleTracking
+        self.onShowReport = onShowReport
         super.init()
 
         statusItem.button?.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
@@ -67,6 +69,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(todayItem)
 
         menu.addItem(.separator())
+        let reportItem = NSMenuItem(title: "Dashboard…", action: #selector(showReport), keyEquivalent: "")
+        reportItem.target = self
+        menu.addItem(reportItem)
+
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
@@ -106,6 +113,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc private func stopFocusTimer() {
         focusTimer.cancel()
+    }
+
+    @objc private func showReport() {
+        onShowReport()
     }
 
     private func refresh() {

@@ -11,13 +11,18 @@ final class Database {
     private var db: OpaquePointer?
     let path: String
 
-    init() {
-        let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = appSupport.appendingPathComponent("Track", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dbURL = dir.appendingPathComponent("track.db")
-        path = dbURL.path
+    /// `overridePath` exists only so development/testing can point at a scratch database
+    /// instead of the real one — the app itself always uses the default.
+    init(overridePath: String? = nil) {
+        if let overridePath {
+            path = overridePath
+        } else {
+            let fm = FileManager.default
+            let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            let dir = appSupport.appendingPathComponent("Track", isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            path = dir.appendingPathComponent("track.db").path
+        }
 
         guard sqlite3_open(path, &db) == SQLITE_OK else {
             fatalError("Track: unable to open database at \(path)")
@@ -108,5 +113,35 @@ final class Database {
         sqlite3_bind_int64(stmt, 1, Int64(startOfDay.timeIntervalSince1970))
         guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
         return Int(sqlite3_column_int64(stmt, 0))
+    }
+
+    struct SessionRow {
+        let id: Int64
+        let start: Int64
+        let end: Int64?
+        let reason: String?
+    }
+
+    /// Every session ever recorded, oldest first — the raw material for the productivity report.
+    func allSessions() -> [SessionRow] {
+        let sql = "SELECT id, start_time, end_time, stop_reason FROM sessions ORDER BY start_time ASC;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+
+        var rows: [SessionRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let id = sqlite3_column_int64(stmt, 0)
+            let start = sqlite3_column_int64(stmt, 1)
+            let end: Int64? = sqlite3_column_type(stmt, 2) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 2)
+            let reason: String?
+            if sqlite3_column_type(stmt, 3) == SQLITE_NULL {
+                reason = nil
+            } else {
+                reason = String(cString: sqlite3_column_text(stmt, 3))
+            }
+            rows.append(SessionRow(id: id, start: start, end: end, reason: reason))
+        }
+        return rows
     }
 }
