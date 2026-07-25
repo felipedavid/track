@@ -17,6 +17,10 @@ macOS.
   until you stop it yourself
 - **Auto-stop on screen lock / system sleep** — stepping away from the computer stops
   an active session automatically, tagged with why it stopped
+- **Global keyboard shortcut** — `⌃⌥⌘T` (Control+Option+Command+T) toggles tracking
+  from anywhere, even when another app is frontmost
+- **Sound feedback** — a distinct sound plays whenever tracking starts ("Pop") or stops
+  ("Bottle"), regardless of what triggered it — menu click, hotkey, or auto-stop
 - **Menu bar indicator** — `○` idle, `●` tracking, `⏰` focus target reached, each
   followed by today's running total (e.g. `● 1h 23m`), refreshed every 15s
 - **Crash-safe** — if the app is killed while tracking, the next launch closes the
@@ -42,9 +46,10 @@ track/
       main.swift               Entry point, starts NSApplication
       AppDelegate.swift        Wires all components together at launch
       Database.swift           SQLite wrapper: schema, session CRUD, crash recovery
-      TimeTracker.swift        Start/stop state machine, live elapsed-time math
+      TimeTracker.swift        Start/stop state machine, live elapsed-time math, sounds
       FocusTimer.swift         Countdown timer, beep on completion
       LockMonitor.swift        Screen lock / sleep notifications -> auto-stop
+      GlobalHotKey.swift       System-wide keyboard shortcut (Carbon hot key API)
       StatusBarController.swift Menu bar item, dropdown menu, all UI
 ```
 
@@ -69,7 +74,19 @@ crash or force-quit can never silently add hours to your log.
 
 **TimeTracker.swift** holds `isTracking` / `currentStart` and calls into `Database` on
 `start()` / `stop(reason:)`. Elapsed time is always computed live from `Date()` rather
-than accumulated in a counter, so it's correct no matter how often the UI redraws.
+than accumulated in a counter, so it's correct no matter how often the UI redraws. Every
+`start()`/`stop()` call plays a system sound (`Pop` / `Bottle`), so this is the single
+place all triggers — menu click, hot key, lock/sleep auto-stop, app quit — get audible
+feedback for free.
+
+**GlobalHotKey.swift** registers `⌃⌥⌘T` system-wide using Carbon's `RegisterEventHotKey`
+— the same mechanism menu bar utilities have used for global shortcuts for decades. It
+doesn't require Accessibility/Input Monitoring permission (unlike an `NSEvent` global
+monitor or `CGEventTap`), so there's no permission prompt to grant. `AppDelegate` defines
+the toggle logic once and passes it to both the menu item and this hot key, so "stop also
+cancels an active focus timer" only has to be expressed in one place. To change the
+shortcut, edit the `keyCode`/`modifiers` passed to `GlobalHotKey(...)` in
+`AppDelegate.swift` (key codes are the `kVK_*` constants from `Carbon.HIToolbox`).
 
 **FocusTimer.swift** starts tracking if it isn't already running, schedules a `Timer`
 for the requested duration, and on fire plays `NSSound.beep()` three times and flips a
