@@ -160,6 +160,17 @@ final class ReportGenerator {
 
         let deepWorkThreshold: Double = 3600
 
+        // Recent-pattern badges (Night Owl, Early Bird, ...) look only at the last 14
+        // days, since a habit from six months ago shouldn't still be flashing a badge.
+        let today = calendar.startOfDay(for: now)
+        let last14Start = calendar.date(byAdding: .day, value: -13, to: today)!
+        var last14TotalSeconds: Double = 0
+        var last14NightSeconds: Double = 0
+        var last14EarlySeconds: Double = 0
+        var last14WeekendSeconds: Double = 0
+        var last14SessionDurations: [Double] = []
+        var last14DaysTracked = Set<Date>()
+
         func extend(_ range: inout [Date: Double], _ day: Date, _ value: Double, reducer: (Double, Double) -> Double) {
             range[day] = range[day].map { reducer($0, value) } ?? value
         }
@@ -196,6 +207,8 @@ final class ReportGenerator {
                 weekStat.total += dur
                 if dur >= deepWorkThreshold { weekStat.deep += dur }
                 weeklyDeep[weekStart] = weekStat
+
+                if d0 >= last14Start { last14SessionDurations.append(dur) }
             }
 
             let smin = minutesSinceMidnight(start)
@@ -207,6 +220,14 @@ final class ReportGenerator {
                 dailySeconds[chunk.day, default: 0] += chunk.seconds
                 punch[mondayIndex(chunk.day)][chunk.hour] += chunk.seconds
                 lastDay = lastDay.map { max($0, chunk.day) } ?? chunk.day
+
+                if chunk.day >= last14Start {
+                    last14TotalSeconds += chunk.seconds
+                    if chunk.hour >= 21 || chunk.hour < 5 { last14NightSeconds += chunk.seconds }
+                    if chunk.hour >= 5 && chunk.hour < 9 { last14EarlySeconds += chunk.seconds }
+                    if mondayIndex(chunk.day) >= 5 { last14WeekendSeconds += chunk.seconds }
+                    last14DaysTracked.insert(chunk.day)
+                }
             }
         }
 
@@ -223,7 +244,6 @@ final class ReportGenerator {
         // Calendar heatmap window: a rolling ~year ending today, aligned to the most
         // recent Sunday so the grid renders exactly like GitHub's contribution graph —
         // fixed to "today", not clipped to the data's own date range.
-        let today = calendar.startOfDay(for: now)
         let approxStart = calendar.date(byAdding: .day, value: -364, to: today)!
         let startWeekday = calendar.component(.weekday, from: approxStart) // 1=Sun...7=Sat
         let calendarStart = calendar.date(byAdding: .day, value: -(startWeekday - 1), to: approxStart)!
@@ -315,6 +335,19 @@ final class ReportGenerator {
             "weekly": deepWorkWeekly,
         ]
 
+        // Raw last-14-day aggregates for the "recent patterns" badges (Night Owl, Early
+        // Bird, ...) — badge thresholds live in JS alongside the other band logic; this
+        // is just the numbers.
+        let recent: [String: Any] = [
+            "total_seconds": last14TotalSeconds,
+            "night_ratio": last14TotalSeconds > 0 ? last14NightSeconds / last14TotalSeconds : 0,
+            "early_ratio": last14TotalSeconds > 0 ? last14EarlySeconds / last14TotalSeconds : 0,
+            "weekend_ratio": last14TotalSeconds > 0 ? last14WeekendSeconds / last14TotalSeconds : 0,
+            "avg_session_seconds": last14SessionDurations.isEmpty ? 0 : last14SessionDurations.reduce(0, +) / Double(last14SessionDurations.count),
+            "session_count": last14SessionDurations.count,
+            "days_tracked": last14DaysTracked.count,
+        ]
+
         let weekStartToday = calendar.date(byAdding: .day, value: -mondayIndex(today), to: today)!
         let monthComps = calendar.dateComponents([.year, .month], from: today)
         let monthStartToday = calendar.date(from: monthComps)!
@@ -358,6 +391,7 @@ final class ReportGenerator {
             "stop_reasons": stopReasons,
             "records": personalRecords,
             "deep_work": deepWork,
+            "recent": recent,
         ]
 
         guard let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []),
@@ -377,11 +411,13 @@ final class ReportGenerator {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Track — Dashboard</title>
 <style>
-  :root { --bg:#f5f5f7; --text:#1d1d1f; --muted:#6e6e73; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0b0b0e; --text:#f2f2f5; --muted:#98989f; } }
+  :root { --bg:#08090b; --text:#f3f1ec; --muted:#8b8b93; --brand:#ff7a45; }
   html, body { margin:0; height:100%; }
   body {
-    background: var(--bg); color: var(--text);
+    background:
+      radial-gradient(ellipse 900px 500px at 15% -10%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 60%),
+      var(--bg);
+    color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Arial, sans-serif;
     display:flex; align-items:center; justify-content:center; text-align:center;
   }
@@ -409,38 +445,34 @@ final class ReportGenerator {
 <title>Track — Dashboard</title>
 <style>
   :root {
-    --bg: #f5f5f7;
-    --card: #ffffff;
-    --text: #1d1d1f;
-    --muted: #6e6e73;
-    --border: rgba(0,0,0,0.08);
-    --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
-    --accent: #0a84ff;
-    --accent2: #7c5cff;
+    --bg: #08090b;
+    --card: #131317;
+    --text: #f3f1ec;
+    --muted: #8b8b93;
+    --border: rgba(255,255,255,0.08);
+    --shadow: 0 1px 0 0 rgba(255,255,255,0.045) inset, 0 14px 28px -14px rgba(0,0,0,0.55);
+    --brand: #ff7a45;
+    --brand2: #ffb648;
+    --accent: #ff7a45;
+    --accent2: #8b5cf6;
     --low: #ff453a;
     --below: #ff9f0a;
-    --good: #32d74b;
+    --good: #32d67c;
     --amazing1: #ffd60a;
     --amazing2: #bf5af2;
     --carmack1: #ff375f;
     --carmack2: #ff9500;
-    --track: rgba(0,0,0,0.06);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b0b0e;
-      --card: #17171b;
-      --text: #f2f2f5;
-      --muted: #98989f;
-      --border: rgba(255,255,255,0.08);
-      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 30px rgba(0,0,0,0.35);
-      --track: rgba(255,255,255,0.07);
-    }
+    --track: rgba(255,255,255,0.06);
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; overflow-anchor: none; }
   html, body { margin: 0; padding: 0; }
   body {
-    background: var(--bg);
+    background:
+      radial-gradient(ellipse 900px 520px at 12% -8%, color-mix(in srgb, var(--brand) 13%, transparent), transparent 60%),
+      radial-gradient(ellipse 700px 480px at 100% 6%, color-mix(in srgb, var(--accent2) 10%, transparent), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -449,51 +481,66 @@ final class ReportGenerator {
   .wrap { max-width: 1080px; margin: 0 auto; }
   .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 
-  header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
-  header h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  header h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: 0.02em; color: var(--muted); font-family: var(--mono); text-transform: uppercase; }
+  header h1 span { color: var(--brand); }
   header .meta { color: var(--muted); font-size: 12.5px; display: flex; align-items: center; gap: 6px; }
   .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); display: inline-block; animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.8); } }
 
   .card {
-    background: var(--card);
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0) 45%), var(--card);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 14px;
     box-shadow: var(--shadow);
     padding: 20px 22px;
   }
   .card + .card, .grid + .card, .card + .grid, .grid + .grid { margin-top: 16px; }
-  .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .card h2 { font-size: 12.5px; font-weight: 600; margin: 0 0 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .card h2::before { content: "›"; color: var(--brand); font-family: var(--mono); margin-right: 7px; font-weight: 700; }
 
-  .hero { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: space-between; }
+  .hero { position: relative; display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: space-between; background: none; border: none; box-shadow: none; padding: 30px 6px 26px; overflow: visible; }
+  .hero::before {
+    content: ""; position: absolute; z-index: -1; pointer-events: none;
+    inset: -30px -10px auto -10px; height: 260px;
+    background: radial-gradient(ellipse 460px 200px at 18% 35%, color-mix(in srgb, var(--brand) 20%, transparent), transparent 72%);
+    filter: blur(6px);
+  }
   .hero-left { min-width: 220px; }
-  .hero-label { color: var(--muted); font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-  .hero-value { font-size: 44px; font-weight: 750; letter-spacing: -0.02em; line-height: 1; }
-  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; margin-top: 10px; }
-  .badge.low { background: color-mix(in srgb, var(--low) 16%, transparent); color: var(--low); }
-  .badge.below { background: color-mix(in srgb, var(--below) 16%, transparent); color: var(--below); }
-  .badge.good { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
-  .badge.amazing { background: linear-gradient(90deg, color-mix(in srgb, var(--amazing1) 20%, transparent), color-mix(in srgb, var(--amazing2) 20%, transparent)); color: var(--amazing2); }
-  .badge.carmack { background: linear-gradient(90deg, color-mix(in srgb, var(--carmack1) 22%, transparent), color-mix(in srgb, var(--carmack2) 22%, transparent)); color: var(--carmack1); animation: glow 1.8s ease-in-out infinite; }
+  .hero-label { color: var(--brand); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 10px; }
+  .hero-value { font-family: var(--mono); font-size: 68px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: 12.5px; font-weight: 700; margin-top: 12px; border: 1px solid transparent; }
+  .badge.low { background: color-mix(in srgb, var(--low) 14%, transparent); color: var(--low); border-color: color-mix(in srgb, var(--low) 30%, transparent); }
+  .badge.below { background: color-mix(in srgb, var(--below) 14%, transparent); color: var(--below); border-color: color-mix(in srgb, var(--below) 30%, transparent); }
+  .badge.good { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+  .badge.amazing { background: linear-gradient(90deg, color-mix(in srgb, var(--amazing1) 18%, transparent), color-mix(in srgb, var(--amazing2) 18%, transparent)); color: var(--amazing1); border-color: color-mix(in srgb, var(--amazing2) 35%, transparent); }
+  .badge.carmack { background: linear-gradient(90deg, color-mix(in srgb, var(--carmack1) 20%, transparent), color-mix(in srgb, var(--carmack2) 20%, transparent)); color: var(--carmack1); border-color: color-mix(in srgb, var(--carmack1) 40%, transparent); animation: glow 1.8s ease-in-out infinite; }
+  .badge.pattern { background: color-mix(in srgb, var(--accent2) 16%, transparent); color: var(--accent2); border-color: color-mix(in srgb, var(--accent2) 32%, transparent); font-size: 12.5px; padding: 6px 13px; cursor: default; }
   @keyframes glow { 0%,100% { box-shadow: 0 0 0 rgba(255,55,95,0); } 50% { box-shadow: 0 0 14px color-mix(in srgb, var(--carmack1) 45%, transparent); } }
-  .hero-sub { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .hero-sub { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
 
   .hero-right { flex: 1; min-width: 260px; }
   .goalbar { position: relative; height: 10px; border-radius: 999px; background: var(--track); overflow: visible; margin-top: 26px; }
   .goalbar-fill { position: absolute; inset: 0; width: 0%; border-radius: 999px; transition: width 900ms cubic-bezier(.16,1,.3,1); }
-  .goalbar-fill.low { background: var(--low); }
-  .goalbar-fill.below { background: var(--below); }
-  .goalbar-fill.good { background: var(--good); }
-  .goalbar-fill.amazing { background: linear-gradient(90deg, var(--amazing1), var(--amazing2)); }
-  .goalbar-fill.carmack { background: linear-gradient(90deg, var(--carmack1), var(--carmack2)); }
-  .goalbar-tick { position: absolute; top: -20px; transform: translateX(-50%); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+  .goalbar-fill.low { background: var(--low); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--low) 55%, transparent); }
+  .goalbar-fill.below { background: var(--below); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--below) 55%, transparent); }
+  .goalbar-fill.good { background: var(--good); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--good) 55%, transparent); }
+  .goalbar-fill.amazing { background: linear-gradient(90deg, var(--amazing1), var(--amazing2)); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--amazing2) 55%, transparent); }
+  .goalbar-fill.carmack { background: linear-gradient(90deg, var(--carmack1), var(--carmack2)); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--carmack1) 55%, transparent); }
+  .goalbar-tick { position: absolute; top: -20px; transform: translateX(-50%); font-size: 10.5px; color: var(--muted); white-space: nowrap; font-family: var(--mono); }
   .goalbar-tick::after { content: ""; position: absolute; top: 20px; left: 50%; width: 1px; height: 10px; background: var(--border); }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 16px 18px; opacity: 0; transform: translateY(6px); animation: rise 480ms cubic-bezier(.16,1,.3,1) forwards; }
+  .stat {
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0) 45%), var(--card);
+    border: 1px solid var(--border); border-radius: 13px; box-shadow: var(--shadow); padding: 16px 18px;
+    opacity: 0; transform: translateY(6px); animation: rise 480ms cubic-bezier(.16,1,.3,1) forwards;
+    transition: border-color 200ms ease;
+  }
+  .stat:hover { border-color: color-mix(in srgb, var(--brand) 35%, var(--border)); }
   .stat .label { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-  .stat .value { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
-  .stat .sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .stat .value { font-family: var(--mono); font-size: 21px; font-weight: 600; letter-spacing: -0.01em; }
+  .stat .sub { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
   @keyframes rise { to { opacity: 1; transform: translateY(0); } }
 
   .card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
@@ -502,25 +549,27 @@ final class ReportGenerator {
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 720px) { .two-col { grid-template-columns: 1fr; } }
 
-  svg text { fill: var(--muted); font-size: 10.5px; font-family: inherit; }
+  svg text { fill: var(--muted); font-size: 10.5px; font-family: var(--mono); }
   .bar { transition: transform 700ms cubic-bezier(.16,1,.3,1), opacity 300ms; cursor: pointer; }
-  .bar:hover { opacity: 0.85; }
+  .bar:hover { opacity: 0.82; }
   .axis-line { stroke: var(--border); stroke-width: 1; }
   .goal-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3,3; }
 
   .tooltip {
     position: fixed; pointer-events: none; z-index: 50;
-    background: var(--text); color: var(--bg);
+    background: #f3f1ec; color: #0c0d0f;
+    font-family: var(--mono);
     font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: 8px;
     opacity: 0; transform: translate(-50%, -6px) scale(0.96);
     transition: opacity 120ms ease, transform 120ms ease;
     white-space: nowrap;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
   }
   .tooltip.show { opacity: 1; transform: translate(-50%, -10px) scale(1); }
-  .tooltip .tt-sub { opacity: 0.7; font-weight: 500; }
+  .tooltip .tt-sub { opacity: 0.65; font-weight: 500; }
 
   .heat-cell { rx: 2.5; transition: filter 120ms ease; cursor: pointer; }
-  .heat-cell:hover { filter: brightness(1.35); }
+  .heat-cell:hover { filter: brightness(1.4); }
 
   .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 10px; }
   .legend .dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; vertical-align: middle; }
@@ -529,15 +578,15 @@ final class ReportGenerator {
   .rbar-label { width: 118px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
   .rbar-track { flex: 1; height: 10px; background: var(--track); border-radius: 999px; overflow: hidden; }
   .rbar-fill { height: 100%; width: 0%; border-radius: 999px; transition: width 800ms cubic-bezier(.16,1,.3,1); }
-  .rbar-val { width: 92px; text-align: right; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+  .rbar-val { width: 92px; text-align: right; font-size: 12px; color: var(--muted); flex-shrink: 0; font-family: var(--mono); }
 
-  footer { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 32px; }
+  footer { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 32px; font-family: var(--mono); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>Track — Dashboard</h1>
+    <h1><span>›</span> track / dashboard</h1>
     <div class="meta" id="meta"></div>
   </header>
 
@@ -594,6 +643,11 @@ final class ReportGenerator {
     </div>
     <div class="hero-sub" style="margin:-6px 0 12px;">Share of tracked time in sessions of 1h or longer, per week — a proxy for focused vs. fragmented work.</div>
     <div id="deepwork"></div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>Last 2 weeks</h2>
+    <div id="badges"></div>
   </div>
 
   <div class="card" style="margin-top:16px">
@@ -707,6 +761,39 @@ function dayBand(seconds) {
   return { key: "good", label: "Goal Met" };
 }
 
+// Compares "this month so far" against the same number of days at the start of last
+// month — a partial month vs. a full one wouldn't be a fair comparison.
+function monthOverMonth() {
+  const byDate = {};
+  DATA.daily.forEach(d => { byDate[d.date] = d.seconds; });
+  const today = new Date();
+  const dom = today.getDate();
+  const thisStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+
+  function sumRange(start, days) {
+    let total = 0;
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      total += byDate[d.toISOString().slice(0, 10)] || 0;
+    }
+    return total;
+  }
+
+  return { thisMonth: sumRange(thisStart, dom), lastMonthComparable: sumRange(lastStart, dom) };
+}
+
+function trendBadgeHTML(pct, suffix, opts) {
+  opts = opts || {};
+  const tag = opts.tag || "div";
+  const up = pct >= 1, down = pct <= -1;
+  const cls = up ? "good" : down ? "low" : "below";
+  const arrow = up ? "▲" : down ? "▼" : "→";
+  const style = tag === "div" ? "font-size:10.5px; padding:2px 7px; margin-top:6px;" : "font-size:10.5px; padding:2px 7px;";
+  return "<" + tag + ' class="badge ' + cls + '" style="' + style + '">' + arrow + " " + Math.abs(pct).toFixed(0) + suffix + "</" + tag + ">";
+}
+
 function renderStats() {
   const s = DATA.summary;
   const band = dayBand(s.today_seconds);
@@ -720,8 +807,18 @@ function renderStats() {
       '<div class="sub">' + todaySub + '</div>' +
     '</div>';
 
+  const mom = monthOverMonth();
+  const momBadge = mom.lastMonthComparable > 0
+    ? trendBadgeHTML(((mom.thisMonth - mom.lastMonthComparable) / mom.lastMonthComparable) * 100, "% vs last month")
+    : "";
+  const monthTile =
+    '<div class="stat" style="animation-delay:35ms">' +
+      '<div class="label">This Month</div>' +
+      '<div class="value num">' + fmtHM(s.month_seconds) + '</div>' +
+      momBadge +
+    '</div>';
+
   const items = [
-    ["This Month", fmtHM(s.month_seconds), null],
     ["All Time", fmtHM(s.all_time_seconds), s.first_day + " → " + s.last_day],
     ["Current Streak", s.current_streak + (s.current_streak === 1 ? " day" : " days"), "longest: " + s.longest_streak],
     ["Avg / Day Worked", fmtHM(s.avg_daily_seconds), s.days_at_goal + " of " + s.days_tracked + " days hit " + DATA.goals.daily + "h"],
@@ -730,8 +827,8 @@ function renderStats() {
     ["Typical Hours", (s.typical_start || "—") + " – " + (s.typical_stop || "—"), "median clock-in/out"],
   ];
   const grid = document.getElementById("stats");
-  grid.innerHTML = todayTile + items.map(([label, value, sub], i) =>
-    '<div class="stat" style="animation-delay:' + ((i + 1) * 35) + 'ms">' +
+  grid.innerHTML = todayTile + monthTile + items.map(([label, value, sub], i) =>
+    '<div class="stat" style="animation-delay:' + ((i + 2) * 35) + 'ms">' +
       '<div class="label">' + label + '</div>' +
       '<div class="value num">' + value + '</div>' +
       (sub ? '<div class="sub">' + sub + '</div>' : "") +
@@ -783,7 +880,7 @@ function renderCalendar() {
     if (r < 0.75) return 3;
     return 4;
   }
-  const colors = ["var(--track)", "#0a84ff33", "#0a84ff77", "#0a84ffbb", "#0a84ff"];
+  const colors = ["var(--track)", "#ff7a4530", "#ff7a4570", "#ff7a45ab", "#ff7a45"];
 
   let lastMonth = -1;
   days.forEach((d, i) => {
@@ -934,8 +1031,13 @@ function renderMonthly() {
 function renderDeepWork() {
   const d = DATA.deep_work;
   const badgeClass = d.all_time_ratio >= 60 ? "good" : d.all_time_ratio >= 35 ? "below" : "low";
-  document.getElementById("deepwork-stat").innerHTML =
-    '<span class="badge ' + badgeClass + '">' + d.all_time_ratio.toFixed(0) + '% all-time</span>';
+  let statHTML = '<span class="badge ' + badgeClass + '">' + d.all_time_ratio.toFixed(0) + '% all-time</span>';
+  if (d.weekly.length >= 4) {
+    const avg = arr => arr.reduce((a, b) => a + b.ratio, 0) / arr.length;
+    const delta = avg(d.weekly.slice(-2)) - avg(d.weekly.slice(-4, -2));
+    statHTML += " " + trendBadgeHTML(delta, "pts / 2wk", { tag: "span" });
+  }
+  document.getElementById("deepwork-stat").innerHTML = statHTML;
   barChart("deepwork", d.weekly, {
     height: 150,
     gap: 4,
@@ -946,6 +1048,44 @@ function renderDeepWork() {
     tooltipTitle: w => w.ratio.toFixed(0) + "% deep work",
     tooltipSub: w => "week of " + w.week_start,
   });
+}
+
+// Lifestyle badges from the last 14 days only — a pattern from months ago shouldn't
+// still be flashing "Night Owl" if you've since become a morning person.
+function renderRecentBadges() {
+  const r = DATA.recent;
+  const container = document.getElementById("badges");
+  const badges = [];
+
+  if (r.total_seconds > 0) {
+    if (r.night_ratio >= 0.25) {
+      badges.push(["Night Owl", Math.round(r.night_ratio * 100) + "% of tracked time fell between 9pm–5am"]);
+    } else if (r.early_ratio >= 0.25) {
+      badges.push(["Early Bird", Math.round(r.early_ratio * 100) + "% of tracked time fell between 5am–9am"]);
+    }
+    if (r.weekend_ratio >= 0.25) {
+      badges.push(["Weekend Warrior", Math.round(r.weekend_ratio * 100) + "% of tracked time was on Sat/Sun"]);
+    }
+  }
+  if (r.session_count > 0) {
+    if (r.avg_session_seconds >= 5400) {
+      badges.push(["Marathoner", "averaged " + fmtHM(r.avg_session_seconds) + " per session"]);
+    } else if (r.avg_session_seconds < 1800 && r.session_count >= 10) {
+      badges.push(["Sprinter", r.session_count + " short sessions, frequent context switches"]);
+    }
+  }
+  if (r.days_tracked >= 12) {
+    badges.push(["Consistent", r.days_tracked + " of the last 14 days tracked"]);
+  }
+
+  if (badges.length === 0) {
+    container.innerHTML = '<div class="hero-sub" style="margin:0;">Not enough of a pattern yet — keep tracking.</div>';
+    return;
+  }
+
+  container.innerHTML = badges.map(([label, detail]) =>
+    '<span class="badge pattern" style="margin:0 8px 8px 0;" title="' + detail + '">' + label + '</span>'
+  ).join("");
 }
 
 // 7-day rolling average of daily hours over the last 90 days, with a dashed reference
@@ -1044,7 +1184,7 @@ function renderPunch() {
     if (r < 0.75) return 3;
     return 4;
   }
-  const colors = ["var(--track)", "#7c5cff33", "#7c5cff77", "#7c5cffbb", "#7c5cff"];
+  const colors = ["var(--track)", "#8b5cf630", "#8b5cf670", "#8b5cf6ab", "#8b5cf6"];
 
   for (let h = 0; h < 24; h++) {
     if (h % 3 === 0) {
@@ -1157,6 +1297,7 @@ function renderAll() {
   renderMonthly();
   renderTrend();
   renderDeepWork();
+  renderRecentBadges();
   renderPunch();
   renderHist();
   renderReasons();

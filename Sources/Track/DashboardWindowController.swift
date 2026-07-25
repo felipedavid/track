@@ -2,15 +2,15 @@ import AppKit
 import WebKit
 
 /// Owns the "Productivity Dashboard" window: a `WKWebView` showing the report built by
-/// `ReportGenerator`. Nothing is written to disk — the page loads once from the database,
-/// and a timer keeps it current while the window is open by pushing fresh data into the
-/// already-loaded page (`DATA = ...; renderAll();`) rather than reloading it, so refreshing
-/// doesn't reset your scroll position out from under you while you're reading a chart.
-final class DashboardWindowController: NSObject, NSWindowDelegate {
+/// `ReportGenerator`. Nothing is written to disk. There's no background refresh — every
+/// click on "Dashboard…" in the menu re-fetches from the database, either loading the
+/// page for the first time or, if it's already open, pushing fresh data into the
+/// already-loaded page (`DATA = ...; renderAll();`) instead of reloading it, so bringing
+/// the window forward doesn't reset your scroll position out from under you.
+final class DashboardWindowController: NSObject {
     private let reportGenerator: ReportGenerator
     private var window: NSWindow?
     private var webView: WKWebView?
-    private var refreshTimer: Timer?
     private var hasLoadedContent = false
 
     init(database: Database) {
@@ -29,7 +29,6 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
             window.title = "Track — Dashboard"
             window.contentView = webView
             window.center()
-            window.delegate = self
             window.isReleasedWhenClosed = false
             self.window = window
             self.webView = webView
@@ -40,7 +39,6 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
 
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        startRefreshTimer()
     }
 
     private func loadFull() {
@@ -60,21 +58,5 @@ final class DashboardWindowController: NSObject, NSWindowDelegate {
         }
         guard let json = reportGenerator.buildRefreshJSON() else { return }
         webView?.evaluateJavaScript("DATA = " + json + "; renderAll();", completionHandler: nil)
-    }
-
-    private func startRefreshTimer() {
-        refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-    }
-
-    func windowDidBecomeKey(_ notification: Notification) {
-        refresh()
     }
 }
