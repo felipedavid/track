@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 /// Owns the menu bar item: live "● 1h 23m" style indicator plus the dropdown menu for
 /// starting/stopping tracking and managing the focus timer.
@@ -11,6 +12,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let toggleTrackingItem = NSMenuItem()
     private let stopFocusTimerItem = NSMenuItem()
     private let todayItem = NSMenuItem()
+    private let launchAtLoginItem = NSMenuItem()
     private let onToggleTracking: () -> Void
     private let onShowReport: () -> Void
 
@@ -74,6 +76,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(reportItem)
 
         menu.addItem(.separator())
+        launchAtLoginItem.title = "Launch at Login"
+        launchAtLoginItem.target = self
+        launchAtLoginItem.action = #selector(toggleLaunchAtLogin)
+        menu.addItem(launchAtLoginItem)
+
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
@@ -119,6 +127,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         onShowReport()
     }
 
+    @objc private func toggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            if service.status == .enabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+        } catch {
+            print("Track: failed to toggle launch-at-login — \(error)")
+        }
+        refresh()
+    }
+
     private func refresh() {
         stopFocusTimerItem.isHidden = !focusTimer.isActive
         let toggleTitle = tracker.isTracking ? "Stop Tracking" : "Start Tracking"
@@ -129,6 +151,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         let todaySeconds = tracker.elapsedTodaySeconds()
         todayItem.title = "Today: \(formatDuration(todaySeconds))"
+
+        launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
 
         statusItem.button?.title = statusText(todaySeconds: todaySeconds)
     }

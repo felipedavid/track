@@ -26,8 +26,11 @@ macOS.
 - **Productivity dashboard** — "Dashboard…" in the menu opens a live window (built with
   a `WKWebView`, no data ever leaves the Mac) with a GitHub-style calendar heatmap, a
   30h/40h/60h weekly goal tracker, a day×hour "when you work" grid, a 7-day momentum
-  trend, deep-work ratio, personal records, and more — computed fresh from `track.db`
-  every time it's opened, and refreshed in place every 30s while it stays open
+  trend, deep-work ratio, personal records, month-over-month and trend indicators, and
+  "last 2 weeks" lifestyle badges (Night Owl, Early Bird, Marathoner, ...) — computed
+  fresh from `track.db` every time the window is opened
+- **Launch at Login** — a menu toggle (via `SMAppService`) to open Track automatically
+  on login, no need to touch System Settings
 - **Crash-safe** — if the app is killed while tracking, the next launch closes the
   dangling session at zero duration instead of silently inflating your hours
 
@@ -107,8 +110,10 @@ focus timer, since its target stops being meaningful once you've stepped away.
 
 **StatusBarController.swift** owns the `NSStatusItem`, builds the dropdown menu (Start/
 Stop Tracking, Start Focus Timer submenu, Stop Focus Timer, today's total, Dashboard,
-Quit), and redraws the title on every state change plus a 15-second timer for the live
-counter.
+Launch at Login, Quit), and redraws the title on every state change plus a 15-second
+timer for the live counter. The Launch at Login checkbox reflects `SMAppService.mainApp
+.status` and is re-synced every time the menu opens, so it stays correct even if login
+items were changed outside the app.
 
 **ReportGenerator.swift** reads every session via `Database.allSessions()` and computes
 every metric shown on the dashboard — streaks, a Sunday-aligned rolling-year calendar
@@ -145,9 +150,10 @@ open Track.app            # after ./build.sh
 swift run
 ```
 
-To have it always available, copy `Track.app` to `/Applications` and add it under
-System Settings → General → Login Items → "Open at Login". It runs with no Dock icon
-or window — the menu bar item is the entire UI. Quit from its menu, or `pkill -x Track`.
+To have it always available, copy `Track.app` to `/Applications`, open it, and toggle
+"Launch at Login" in its menu (uses `SMAppService`, macOS 13+ — no need to touch System
+Settings). It runs with no Dock icon or window — the menu bar item is the entire UI. Quit
+from its menu, or `pkill -x Track`.
 
 ## Querying your history
 
@@ -169,7 +175,7 @@ sqlite3 ~/Library/Application\ Support/Track/track.db \
 
 - A session that runs past midnight is attributed entirely to the day it started on —
   "today's total" won't split it at the day boundary.
-- No launch-at-login is configured automatically; add it manually via Login Items if
-  wanted (see above).
+- `SMAppService` registration is keyed to the app's bundle path, so "Launch at Login"
+  needs re-toggling if `Track.app` is moved or rebuilt in place at a different path.
 - No packaging/notarization for distribution outside your own Mac — `build.sh` ad-hoc
   signs just enough for Gatekeeper to allow a local launch.
